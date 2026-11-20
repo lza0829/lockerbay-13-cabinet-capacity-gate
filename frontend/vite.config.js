@@ -8,4 +8,8 @@ export default defineConfig({
     port: 6100,
     proxy: { '/api': 'http://127.0.0.1:11100' },
   },
+  test: {
+    environment: 'jsdom',
+    include: ['tests/**/*.spec.js'],
+  },
 })

@@ -1,5 +1,8 @@
+from app.modules import cabinet_capacity_gate as capacity_gate
+
+
 def overview(conn):
-    return {
+    data = {
         "cabinets": conn.execute("SELECT COUNT(*) AS c FROM cabinets").fetchone()["c"],
         "cells": conn.execute("SELECT COUNT(*) AS c FROM cells").fetchone()["c"],
         "occupied": conn.execute("SELECT COUNT(*) AS c FROM cells WHERE status='occupied'").fetchone()["c"],
@@ -10,6 +13,10 @@ def overview(conn):
             "SELECT COUNT(*) AS c FROM occupancies WHERE status='occupied'"
         ).fetchone()["c"],
     }
+    matrix = capacity_gate.capacity_matrix(conn)
+    data["full_cabinets"] = matrix["totals"]["full_cabinets"]
+    data["capacity_holds"] = matrix["totals"]["holds"]
+    return data
 
 
 def cabinet_matrix(conn):
@@ -29,5 +36,5 @@ def cabinet_matrix(conn):
                 (cell["id"],),
             ).fetchone()
             cell["occupancy"] = dict(occ) if occ else None
-        out.append({**cab, "cells": cells})
+        out.append({**cab, "cells": cells, "capacity": capacity_gate.capacity_snapshot(conn, cab["id"])})
     return out

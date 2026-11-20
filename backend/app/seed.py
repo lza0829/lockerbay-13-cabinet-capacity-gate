@@ -2,6 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from app.db import FIXTURES_DIR, connect
+from app.modules import cabinet_capacity_gate as capacity_gate
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -102,6 +103,7 @@ def _seed(conn):
             "INSERT INTO cells(id, cabinet_id, code, size_code, status) VALUES (?,?,?,?,?)",
             (cell["id"], cell["cabinet_id"], cell["code"], cell.get("size_code", "M"), "free"),
         )
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     for ev in sorted(data.get("events", []), key=lambda e: (e["event_ts"], e["id"])):
         conn.execute(
             "INSERT INTO parcel_events(id, cabinet_id, cell_id, event_type, event_ts, tracking_no, payload_json, channel) VALUES (?,?,?,?,?,?,?,?)",
@@ -113,36 +115,26 @@ def _seed(conn):
                 ev["event_ts"],
                 ev.get("tracking_no"),
                 json.dumps(ev.get("payload", {}), ensure_ascii=False),
-                "primary",
+                ev.get("channel", "primary"),
             ),
         )
-        if ev["event_type"] == "drop" and ev.get("cell_id"):
-            oid = f"OCC-{ev['cell_id']}-{ev['id']}"
-            conn.execute(
-                "INSERT INTO occupancies(id, cell_id, tracking_no, opened_at, closed_at, status, last_event_id) VALUES (?,?,?,?,?,?,?)",
-                (oid, ev["cell_id"], ev["tracking_no"], ev["event_ts"], None, "occupied", ev["id"]),
+        if ev["event_type"] == "drop":
+            # 与装载入口共用同一容量闸：灌满一柜后继续投该柜同样进搁置。
+            result = capacity_gate.apply_drop(
+                conn, ev, batch_id="seed", decided_at=now
             )
-            conn.execute("UPDATE cells SET status='occupied' WHERE id=?", (ev["cell_id"],))
-            conn.execute(
-                "INSERT INTO occupancy_proofs(occupancy_id, cell_id, tracking_no, opened_at, closed_at, event_ids_json, created_at) VALUES (?,?,?,?,?,?,?)",
-                (
-                    oid,
-                    ev["cell_id"],
-                    ev["tracking_no"],
-                    ev["event_ts"],
-                    None,
-                    json.dumps([ev["id"]], ensure_ascii=False),
-                    datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                ),
-            )
-        elif ev["event_type"] == "pickup" and ev.get("cell_id"):
-            row = conn.execute(
-                "SELECT id FROM occupancies WHERE cell_id=? AND status='occupied' ORDER BY opened_at DESC LIMIT 1",
-                (ev["cell_id"],),
-            ).fetchone()
-            if row:
+            if result["action"] == "materialized":
                 conn.execute(
-                    "UPDATE occupancies SET closed_at=?, status='released', last_event_id=? WHERE id=?",
-                    (ev["event_ts"], ev["id"], row["id"]),
+                    "INSERT INTO occupancy_proofs(occupancy_id, cell_id, tracking_no, opened_at, closed_at, event_ids_json, created_at) VALUES (?,?,?,?,?,?,?)",
+                    (
+                        result["occupancy_id"],
+                        result["cell_id"],
+                        ev.get("tracking_no") or ev["id"],
+                        ev["event_ts"],
+                        None,
+                        json.dumps([ev["id"]], ensure_ascii=False),
+                        now,
+                    ),
                 )
-                conn.execute("UPDATE cells SET status='free' WHERE id=?", (ev["cell_id"],))
+        elif ev["event_type"] == "pickup":
+            capacity_gate.release_pickup(conn, ev)

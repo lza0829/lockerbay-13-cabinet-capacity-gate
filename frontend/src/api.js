@@ -15,6 +15,9 @@ export const api = {
   events: () => req('/api/events'),
   quarantine: () => req('/api/quarantine'),
   proofs: () => req('/api/occupancy-proofs'),
+  capacity: () => req('/api/cabinet-capacity'),
+  capacityHolds: (cabinet_id) =>
+    req(`/api/cabinet-capacity/holds${cabinet_id ? `?cabinet_id=${encodeURIComponent(cabinet_id)}` : ''}`),
   settings: () => req('/api/settings'),
   setOverdue: (overdue_hours) =>
     req('/api/settings/overdue-hours', { method: 'PUT', body: JSON.stringify({ overdue_hours }) }),

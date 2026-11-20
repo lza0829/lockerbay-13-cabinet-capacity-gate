@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Body, HTTPException
 
 from app.db import connect
+from app.modules import cabinet_capacity_gate as capacity_gate
 from app.seed import overdue_hours
 from app.services import bay as bay_svc
 from app.services import ingest as ingest_svc
@@ -24,6 +25,29 @@ def bay_matrix():
     conn = connect()
     try:
         return bay_svc.cabinet_matrix(conn)
+    finally:
+        conn.close()
+
+
+@router.get("/cabinet-capacity")
+def cabinet_capacity(cabinet_id: str | None = None):
+    """只读：柜级容量核证（occupied / capacity / free / 一致性 / 搁置数）。"""
+    conn = connect()
+    try:
+        if cabinet_id:
+            snapshot = capacity_gate.capacity_snapshot(conn, cabinet_id)
+            snapshot["holds"] = capacity_gate.hold_records(conn, cabinet_id)
+            return snapshot
+        return capacity_gate.capacity_matrix(conn)
+    finally:
+        conn.close()
+
+
+@router.get("/cabinet-capacity/holds")
+def cabinet_capacity_holds(cabinet_id: str | None = None):
+    conn = connect()
+    try:
+        return capacity_gate.hold_records(conn, cabinet_id)
     finally:
         conn.close()
 
